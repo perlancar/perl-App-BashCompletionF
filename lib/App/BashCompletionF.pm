@@ -394,7 +394,6 @@ sub _add_pc {
 
                 $prog =~ $Text::Fragment::re_id or next;
 
-                say "Adding to bash-completion-f: $prog";
                 push @progs, $prog;
                 $added++;
                 $names{$prog}++;
@@ -414,6 +413,7 @@ sub _add_pc {
 
     my $envres = envresmulti();
     for my $prog (@progs) {
+        say "Adding to bash-completion-f: $prog";
         my $insres = Text::Fragment::insert_fragment(
             text=>$content, id=>$prog,
             payload=>"complete -C '$prog' '$prog'");
