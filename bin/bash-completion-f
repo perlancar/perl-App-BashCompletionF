@@ -1,0 +1,125 @@
+#!perl
+
+# DATE
+# VERSION
+
+use 5.010;
+use strict;
+use warnings;
+
+use Perinci::CmdLine::Any -prefer_lite=>1;
+
+my $urlprefix = '/App/BashCompletionF/';
+Perinci::CmdLine::Any->new(
+    url => $urlprefix,
+    subcommands => {
+        add          => {url=>"${urlprefix}add_entry"},
+        'add-pc'     => {url=>"${urlprefix}add_entry_pc"},
+        'add-all-pc' => {url=>"${urlprefix}add_all_pc"},
+        remove       => {url=>"${urlprefix}remove_entry"},
+        list         => {url=>"${urlprefix}list_entries"},
+        clean        => {url=>"${urlprefix}clean_entries"},
+    },
+)->run;
+
+# ABSTRACT: Manage bash completion commands/scripts
+# PODNAME: bash-completion-f
+
+=head1 SYNOPSIS
+
+=head2 Installation
+
+To install system-wide:
+
+ % touch /etc/bash-completion-f
+
+and put C<. /etc/bash-completion-f> in C</etc/bash.bashrc> or C</etc/profile>.
+
+To install for a single user:
+
+ % touch ~/.bash-completion-f
+
+and put C<. ~/.bash-completion-f> in ~/.bashrc or C<~/.bash_profile>.
+
+=head2 Usage
+
+To add a completion command:
+
+ % bash-completion-f add --id bar 'complete -C foo bar'
+
+which will add a line like this in C</etc/bash-completion-f> (if you are running
+as root) or C<~/.bash-completion-f> (if running as normal user):
+
+ complete -C foo bar # FRAGMENT id=bar
+
+Later you can remove this line programmatically with:
+
+ % bash-completion-f remove --id bar
+
+You can also add a multiline command, e.g.:
+
+ % bash-completion-f add --id qux '
+ _qux() {
+   ...
+ }
+ complete -F _qux qux'
+
+which will add these lines to the file:
+
+ # BEGIN FRAGMENT id=qux
+ _qux() {
+   ...
+ }
+ complete -F _qux qux
+ # END FRAGMENT id=qux
+
+For more subcommands and options, see documentation or C<bash-completion-f
+--help>.
+
+
+=head1 DESCRIPTION
+
+This script can be used to manage a collection of completion scripts. It is
+somewhat similar to the B<bash-completion> package, except for a few differences
+described below:
+
+Firstly, the goal of the C<bash-completion> project is to collect completion
+routines for most Unix/Linux command-line utilities, while the goal of
+C<bash-completion-f> is to make it easier to add/remove a collection of
+C<complete> bash commands.
+
+Secondly, due to its goal, if you install and use C<bash-completion> you will
+notice a significant overhead/delay everytime you start a new shell, because
+bash has to parse thousands of lines of completion definition, even though I
+won't be using most of the completions. I currently disable bash-completion
+exactly for this reason. There is currently an effort to do dynamic loading of
+completions: if that feature arrives, then I will probably use the package
+again.
+
+C<bash-completion-f> arose from my need to ease installing (and uninstalling)
+bash completion routines. I write lots of command-line utilities packaged as
+Perl distributions. Written using the L<Perinci::CmdLine> framework, these
+utilities have bash completion capability, activated using C<complete -C
+command-name command-name>. Using this script, instead of putting those
+C<complete> commands directly on bash startup file, I can put them in
+C</etc/bash-completion-f> or C<~/.bash-completion-f> and manage them using the
+script.
+
+To keep things simple, by default C<bash-completion-f> stores the C<complete>
+commands in a single file instead of a directory. Each entry is marked and can
+be added and removed separately.
+
+A special shortcut is provided for these L<Perinci::CmdLine>-based utilities. If
+you say:
+
+ % bash-completion-f add-pc foo
+
+it is equivalent to:
+
+ % bash-completion-f add --id foo 'complete -C foo foo'
+
+
+=head1 SEE ALSO
+
+B<bash-completion> package, http://bash-completion.alioth.debian.org/
+
