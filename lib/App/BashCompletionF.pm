@@ -302,9 +302,6 @@ _
     },
 };
 sub add_all_pc {
-    require File::chdir;
-    File::chdir->import;
-
     my %args = @_;
 
     my $res = _read_parse_f($args{file});
