@@ -16,7 +16,7 @@ Perinci::CmdLine::Any->new(
         add          => {url=>"${urlprefix}add_entry"},
         'add-pc'     => {url=>"${urlprefix}add_entries_pc"},
         'add-all-pc' => {url=>"${urlprefix}add_all_pc"},
-        remove       => {url=>"${urlprefix}remove_entry"},
+        remove       => {url=>"${urlprefix}remove_entries"},
         list         => {url=>"${urlprefix}list_entries"},
         clean        => {url=>"${urlprefix}clean_entries"},
     },
@@ -118,6 +118,13 @@ you say:
 it is equivalent to:
 
  % bash-completion-f add --id foo 'complete -C foo foo'
+
+
+=head1 ENVIRONMENT
+
+=head2 DEBUG => bool
+
+Set to true to enable debugging messages.
 
 
 =head1 SEE ALSO

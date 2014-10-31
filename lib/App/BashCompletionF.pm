@@ -15,6 +15,8 @@ use Text::Fragment qw();
 
 our %SPEC;
 
+my $DEBUG = $ENV{DEBUG};
+
 $SPEC{':package'} = {
     v => 1.1,
     summary => 'Manipulate bash-completion-f file which contains completion scripts',
@@ -61,6 +63,17 @@ my %arg_id = (id => {
     schema  => ['str*', {match => $Text::Fragment::re_id}],
     req     => 1,
     pos     => 0,
+});
+
+my %arg_ids = (id => {
+    summary => 'Entry ID(s)',
+    schema  => ['array*' => {
+        of      => ['str*', {match => $Text::Fragment::re_id}],
+        min_len => 1,
+    }],
+    req     => 1,
+    pos     => 0,
+    greedy  => 1,
 });
 
 my %arg_program = (program => {
@@ -155,36 +168,71 @@ sub add_entries_pc {
     _add_pc({progs=>delete($args{program})}, %args);
 }
 
-$SPEC{remove_entry} = {
-    v => 1.1,
-    summary => '',
-    args => {
-        %arg_id,
-        %arg_file,
-    },
-};
-sub remove_entry {
+sub _delete_entries {
+    my $opts = shift;
+
     my %args = @_;
-
-    my $id = $args{id};
-
-    # XXX schema (coz when we're not using P::C there's no schema validation)
-    $id =~ $Text::Fragment::re_id or
-        return [400, "Invalid syntax for 'id', please use word only"];
-
     my $res = _read_parse_f($args{file});
     return err("Can't read entries", $res) if $res->[0] != 200;
 
-    my $delres = Text::Fragment::delete_fragment(
-        text=>$res->[2]{content}, id=>$id);
-    return err("Can't delete", $delres) if $delres->[0] !~ /200|304/;
+    my $envres = envresmulti();
 
-    if ($delres->[0] == 200) {
-        my $writeres = _write_f($args{file}, $delres->[2]{text});
+    my $content = $res->[2]{content};
+    my $deleted;
+    for my $entry (@{ $res->[2]{parsed} }) {
+        my $parseres = _parse_entry($entry->{payload});
+        unless ($parseres->[0] == 200) {
+            warn "Can't parse 'complete' command for entry '$entry->{id}': ".
+                "$parseres->[1], skipped\n";
+            next;
+        }
+        my $remove;
+        if ($opts->{criteria}) {
+            $remove = $opts->{criteria}->($parseres->[2]{names});
+        } elsif ($opts->{ids}) {
+            use experimental 'smartmatch';
+            for (@{ $parseres->[2]{names} }) {
+                if ($_ ~~ @{ $opts->{ids} }) {
+                    $remove++;
+                    last;
+                }
+            }
+        }
+        next unless $remove;
+        say "Removing " . join(", ", @{$parseres->[2]{names}});
+        my $delres = Text::Fragment::delete_fragment(
+            text=>$content, id=>$entry->{id});
+        next if $delres->[0] == 304;
+        $envres->add_result($delres->[0], $delres->[1],
+                            {item_id=>$entry->{id}});
+        next if $delres->[0] != 200;
+        $deleted++;
+        $content = $delres->[2]{text};
+    }
+
+    if ($deleted) {
+        my $writeres = _write_f($args{file}, $content);
         return err("Can't write", $writeres) if $writeres->[0] != 200;
     }
 
-    [200];
+    $envres->as_struct;
+}
+
+$SPEC{remove_entries} = {
+    v => 1.1,
+    summary => '',
+    args => {
+        %arg_ids,
+        %arg_file,
+    },
+};
+sub remove_entries {
+    my %args = @_;
+
+    _delete_entries(
+        {ids=>delete($args{id})},
+        %args
+    );
 }
 
 $SPEC{list_entries} = {
@@ -265,43 +313,19 @@ sub clean_entries {
     require File::Which;
 
     my %args = @_;
-
-    my $res = _read_parse_f($args{file});
-    return err("Can't read entries", $res) if $res->[0] != 200;
-
-    my $content = $res->[2]{content};
-    my $deleted;
-    for my $entry (@{ $res->[2]{parsed} }) {
-        my $parseres = _parse_entry($entry->{payload});
-        unless ($parseres->[0] == 200) {
-            warn "Can't parse 'complete' command for entry '$entry->{id}': ".
-                "$parseres->[1], skipped\n";
-            next;
-        }
-        # remove if none of the names in complete command are in PATH
-        my $found;
-        for my $name (@{ $parseres->[2]{names} }) {
-            if (File::Which::which($name)) {
-                $found++; last;
-            }
-        }
-        next if $found;
-        say join(", ", @{$parseres->[2]{names}})." not found in PATH, ".
-            "removing entry $entry->{id}";
-        my $delres = Text::Fragment::delete_fragment(
-            text=>$content, id=>$entry->{id});
-        return err("Can't delete entry $entry->{id}", $delres)
-            if $delres->[0] != 200;
-        $deleted++;
-        $content = $delres->[2]{text};
-    }
-
-    if ($deleted) {
-        my $writeres = _write_f($args{file}, $content);
-        return err("Can't write", $writeres) if $writeres->[0] != 200;
-    }
-
-    [200];
+    _delete_entries(
+        {criteria => sub {
+             my $names = shift;
+             # remove if none of the names in complete command are in PATH
+             for my $name (@{ $names }) {
+                 if (File::Which::which($name)) {
+                     return 0;
+                 }
+             }
+             return 1;
+         }},
+        %args,
+    );
 }
 
 sub _add_pc {
@@ -332,16 +356,16 @@ sub _add_pc {
     if ($opts->{dirs}) {
         for my $dir (@{ $opts->{dirs} }) {
             opendir my($dh), $dir or next;
-            #say "D:searching $dir";
+            say "DEBUG:Searching $dir ..." if $DEBUG;
             for my $prog (readdir $dh) {
-                (-f "$dir/$prog") && (-x _) or next;
+                next if $prog eq '.' || $prog eq '..';
+                (-f "$dir/$prog") && (-x _) or do { say "DEBUG:Skipping $prog (not an executable)" if $DEBUG; next };
                 $names{$prog} and next;
 
-                # skip non-scripts
-                open my($fh), "<", "$dir/$prog" or next;
+                open my($fh), "<", "$dir/$prog" or do { say "DEBUG:Skipping $prog (can't read)" if $DEBUG; next };
                 read $fh, my($buf), 2; $buf eq '#!' or next;
                 # skip non perl
-                my $shebang = <$fh>; $shebang =~ /perl/ or next;
+                my $shebang = <$fh>; $shebang =~ /perl/ or do { say "DEBUG:Skipping $prog (not Perl script)" if $DEBUG; next };
                 my $found;
                 # skip unless we found something like 'use Perinci::CmdLine'
                 while (<$fh>) {
@@ -349,11 +373,11 @@ sub _add_pc {
                         $found++; last;
                     }
                 }
-                next unless $found;
+                $found or do { say "DEBUG:Skipping $prog (no usage of Perinci::CmdLine)" if $DEBUG; next };
 
                 $prog =~ $Text::Fragment::re_id or next;
 
-                #say "D:$dir/$prog is a Perinci::CmdLine program";
+                say "Adding $prog";
                 push @progs, $prog;
                 $added++;
                 $names{$prog}++;
@@ -402,7 +426,7 @@ _
 };
 sub add_all_pc {
     my %args = @_;
-    _add_pc({dirs => delete($args{dirs}) // [split /:/, $ENV{PATH}]}, %args);
+    _add_pc({dirs => delete($args{dir}) // [split /:/, $ENV{PATH}]}, %args);
 }
 
 1;
