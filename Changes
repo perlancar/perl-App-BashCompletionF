@@ -1,5 +1,19 @@
 Revision history for App-BashCompletionF
 
+0.02    2014-10-31 (PERLANCAR)
+
+        [ENHANCEMENTS]
+
+        - Add subcommand: remove-all.
+
+        - Subcommands remove and add-pc now accept multiple arguments.
+
+        - Subcommand add-all-pc can now accept dirs (but still defaults to PATH
+          if none are specified).
+
+        - Observe DEBUG environment variable.
+
+
 0.01    2014-10-31 (PERLANCAR)
 
         - First release.
