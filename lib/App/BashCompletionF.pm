@@ -197,7 +197,10 @@ sub _delete_entries {
                     last;
                 }
             }
+        } else {
+            die "BUG: no criteria nor ids are given";
         }
+
         next unless $remove;
         say "Removing " . join(", ", @{$parseres->[2]{names}});
         my $delres = Text::Fragment::delete_fragment(
@@ -233,6 +236,20 @@ sub remove_entries {
         {ids=>delete($args{id})},
         %args
     );
+}
+
+$SPEC{remove_all_entries} = {
+    v => 1.1,
+    summary => 'Remove all entries',
+    description => <<'_',
+_
+    args => {
+        %arg_file,
+    },
+};
+sub remove_all_entries {
+    my %args = @_;
+    _delete_entries({criteria=>sub{1}}, %args);
 }
 
 $SPEC{list_entries} = {
