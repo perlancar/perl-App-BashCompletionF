@@ -14,7 +14,7 @@ Perinci::CmdLine::Any->new(
     url => $urlprefix,
     subcommands => {
         add          => {url=>"${urlprefix}add_entry"},
-        'add-pc'     => {url=>"${urlprefix}add_entry_pc"},
+        'add-pc'     => {url=>"${urlprefix}add_entries_pc"},
         'add-all-pc' => {url=>"${urlprefix}add_all_pc"},
         remove       => {url=>"${urlprefix}remove_entry"},
         list         => {url=>"${urlprefix}list_entries"},

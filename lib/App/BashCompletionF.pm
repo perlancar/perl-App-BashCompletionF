@@ -9,6 +9,7 @@ use warnings;
 
 use File::Slurp::Tiny qw();
 use List::Util qw(first);
+use Perinci::Object;
 use Perinci::Sub::Util qw(err);
 use Text::Fragment qw();
 
@@ -63,10 +64,24 @@ my %arg_id = (id => {
 });
 
 my %arg_program = (program => {
-    summary => 'Program name to add',
-    schema => ['str*', {match=>$Text::Fragment::re_id}],
+    summary => 'Program name(s) to add',
+    schema => ['array*' => {
+        of => ['str*', {match=>$Text::Fragment::re_id}], # XXX strip dir first before matching
+        min_len => 1,
+    }],
     req => 1,
     pos => 0,
+    greedy => 1,
+});
+
+my %arg_dir = (dir => {
+    summary => 'Dir and file name(s) to search',
+    schema => ['array*' => {
+        of => ['str*'], # XXX strip dir first before matching
+        min_len => 1,
+    }],
+    pos => 0,
+    greedy => 1,
 });
 
 $SPEC{add_entry} = {
@@ -113,18 +128,20 @@ sub add_entry {
     [200];
 }
 
-$SPEC{add_entry_pc} = {
+$SPEC{add_entries_pc} = {
     v => 1.1,
-    summary => 'Add a completion entry (shortcut for Perinci::CmdLine-based CLI programs)',
+    summary => 'Add completion entries for Perinci::CmdLine-based CLI programs',
     description => <<'_',
 
 This is a shortcut for `add_entry`. Doing:
 
-    % bash-completion-f add-pc foo
+    % bash-completion-f add-pc foo bar baz
 
 will be the same as:
 
     % bash-completion-f add --id foo 'complete -C foo foo'
+    % bash-completion-f add --id bar 'complete -C bar bar'
+    % bash-completion-f add --id baz 'complete -C baz baz'
 
 _
     args => {
@@ -132,19 +149,10 @@ _
         %arg_file,
     },
 };
-sub add_entry_pc {
+sub add_entries_pc {
     my %args = @_;
-    my $prog = $args{program};
 
-    # XXX schema (coz when we're not using P::C there's no schema validation)
-    $prog =~ $Text::Fragment::re_id or
-        return [400, "Invalid syntax for 'program', ".
-                    "please don't use strange characters"];
-
-    add_entry(
-        id => $prog,
-        content => "complete -C '$prog' '$prog'",
-    );
+    _add_pc({progs=>delete($args{program})}, %args);
 }
 
 $SPEC{remove_entry} = {
@@ -296,17 +304,9 @@ sub clean_entries {
     [200];
 }
 
-$SPEC{add_all_pc} = {
-    v => 1.1,
-    summary => 'Search PATH for scripts that use Perinci::CmdLine '.
-        'and add completion for those',
-    description => <<'_',
-_
-    args => {
-        %arg_file,
-    },
-};
-sub add_all_pc {
+sub _add_pc {
+    my $opts = shift;
+
     my %args = @_;
 
     my $res = _read_parse_f($args{file});
@@ -327,40 +327,58 @@ sub add_all_pc {
     }
 
     my $added;
-    for my $dir (split /:/, $ENV{PATH}) {
-        opendir my($dh), $dir or next;
-        #say "D:searching $dir";
-        for my $prog (readdir $dh) {
-            (-f "$dir/$prog") && (-x _) or next;
-            $names{$prog} and next;
+    my @progs;
 
-            # skip non-scripts
-            open my($fh), "<", "$dir/$prog" or next;
-            read $fh, my($buf), 2; $buf eq '#!' or next;
-            # skip non perl
-            my $shebang = <$fh>; $shebang =~ /perl/ or next;
-            my $found;
-            # skip unless we found something like 'use Perinci::CmdLine'
-            while (<$fh>) {
-                if (/^\s*(use|require)\s+Perinci::CmdLine(|::Any|::Lite)/) {
-                    $found++; last;
+    if ($opts->{dirs}) {
+        for my $dir (@{ $opts->{dirs} }) {
+            opendir my($dh), $dir or next;
+            #say "D:searching $dir";
+            for my $prog (readdir $dh) {
+                (-f "$dir/$prog") && (-x _) or next;
+                $names{$prog} and next;
+
+                # skip non-scripts
+                open my($fh), "<", "$dir/$prog" or next;
+                read $fh, my($buf), 2; $buf eq '#!' or next;
+                # skip non perl
+                my $shebang = <$fh>; $shebang =~ /perl/ or next;
+                my $found;
+                # skip unless we found something like 'use Perinci::CmdLine'
+                while (<$fh>) {
+                    if (/^\s*(use|require)\s+Perinci::CmdLine(|::Any|::Lite)/) {
+                        $found++; last;
+                    }
                 }
+                next unless $found;
+
+                $prog =~ $Text::Fragment::re_id or next;
+
+                #say "D:$dir/$prog is a Perinci::CmdLine program";
+                push @progs, $prog;
+                $added++;
+                $names{$prog}++;
             }
-            next unless $found;
-
-            $prog =~ $Text::Fragment::re_id or next;
-
-            #say "D:$dir/$prog is a Perinci::CmdLine program";
-
-            my $insres = Text::Fragment::insert_fragment(
-                text=>$content, id=>$prog,
-                payload=>"complete -C '$prog' '$prog'");
-            return err("Can't add entry $prog", $insres)
-                if $insres->[0] != 200;
+        }
+    } elsif ($opts->{progs}) {
+        for my $prog (@{ $opts->{progs} }) {
+            $prog =~ s!.+/!!;
+            $names{$prog} and next;
+            push @progs, $prog;
             $added++;
             $names{$prog}++;
-            $content = $insres->[2]{text};
         }
+    } else {
+        die "BUG: no progs or dirs given";
+    }
+
+    my $envres = envresmulti();
+    for my $prog (@progs) {
+        my $insres = Text::Fragment::insert_fragment(
+            text=>$content, id=>$prog,
+            payload=>"complete -C '$prog' '$prog'");
+        $envres->add_result($insres->[0], $insres->[1], {item_id=>$prog});
+        next unless $insres->[0] == 200;
+        $content = $insres->[2]{text};
     }
 
     if ($added) {
@@ -368,7 +386,23 @@ sub add_all_pc {
         return err("Can't write", $writeres) if $writeres->[0] != 200;
     }
 
-    [200];
+    $envres->as_struct;
+}
+
+$SPEC{add_all_pc} = {
+    v => 1.1,
+    summary => 'Find all scripts that use Perinci::CmdLine in specified dirs (or PATH)' .
+        ' and add completion entries for them',
+    description => <<'_',
+_
+    args => {
+        %arg_file,
+        %arg_dir,
+    },
+};
+sub add_all_pc {
+    my %args = @_;
+    _add_pc({dirs => delete($args{dirs}) // [split /:/, $ENV{PATH}]}, %args);
 }
 
 1;
