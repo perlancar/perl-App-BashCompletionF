@@ -101,10 +101,10 @@ C<bash-completion-f> arose from my need to ease installing (and uninstalling)
 bash completion routines. I write lots of command-line utilities packaged as
 Perl distributions. Written using the L<Perinci::CmdLine> framework, these
 utilities have bash completion capability, activated using C<complete -C
-command-name command-name>. Using this script, instead of putting those
-C<complete> commands directly on bash startup file, I can put them in
-C</etc/bash-completion-f> or C<~/.bash-completion-f> and manage them using the
-script.
+command-name command-name> (the scripts are handling their own completion).
+Using this script, instead of putting those C<complete> commands directly on
+bash startup file, I can put them in C</etc/bash-completion-f> or
+C<~/.bash-completion-f> and manage them using the script.
 
 To keep things simple, by default C<bash-completion-f> stores the C<complete>
 commands in a single file instead of a directory (thus the "-f" suffix in the
@@ -114,11 +114,55 @@ and can be added and removed separately.
 A special shortcut is provided for these L<Perinci::CmdLine>-based utilities. If
 you say:
 
- % bash-completion-f add-pc foo
+ % bash-completion-f add-pc foo bar
 
 it is equivalent to:
 
  % bash-completion-f add --id foo 'complete -C foo foo'
+ % bash-completion-f add --id bar 'complete -C bar bar'
+
+Another convenient is a C<add-all-pc> to scan all Perinci::CmdLine-based scripts
+in PATH and add them all:
+
+ % bash-completion-f add-all-pc
+
+Or all scripts in specified directories:
+
+ % bash-completion-f add-all-pc ~/scripts
+
+
+=head1 COMMAND-LINE OPTIONS
+
+These options are common for all subcommands.
+
+=head2 --file, -f
+
+Specify an alternate location for the C<bash-completion-f> file. By default it's
+C</etc/bash-completion-f> for root, or C<~/.bash-completion-f> for normal users.
+
+
+=head1 SUBCOMMANDS
+
+(This section will be generated dynamically in the future).
+
+=head2 add
+
+=head2 add-pc
+
+=head2 add-all-pc
+
+=head2 remove
+
+=head2 remove-all
+
+This subcommand will empty your C<bash-completion-f> file by removing all
+entries.
+
+=head2 list
+
+Options: C<--detail>.
+
+=head2 clean
 
 
 =head1 ENVIRONMENT
@@ -132,3 +176,4 @@ Set to true to enable debugging messages.
 
 B<bash-completion> package, http://bash-completion.alioth.debian.org/
 
+L<Dist::Zilla::Plugin::Rinci::InstallCompletion>
