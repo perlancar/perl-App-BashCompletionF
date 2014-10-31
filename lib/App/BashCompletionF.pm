@@ -367,5 +367,5 @@ sub add_all_pc {
 }
 
 1;
-# ABSTRACT: Backend for bash-completion-f
+# ABSTRACT: Backend for bash-completion-f script
 
