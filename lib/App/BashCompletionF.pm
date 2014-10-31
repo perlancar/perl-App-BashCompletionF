@@ -14,6 +14,11 @@ use Text::Fragment qw();
 
 our %SPEC;
 
+$SPEC{':package'} = {
+    v => 1.1,
+    summary => 'Manipulate bash-completion-f file which contains completion scripts',
+};
+
 sub _f_path {
     if ($>) {
         "$ENV{HOME}/.bash-completion-f";
