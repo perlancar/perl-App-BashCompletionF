@@ -106,8 +106,9 @@ C</etc/bash-completion-f> or C<~/.bash-completion-f> and manage them using the
 script.
 
 To keep things simple, by default C<bash-completion-f> stores the C<complete>
-commands in a single file instead of a directory. Each entry is marked and can
-be added and removed separately.
+commands in a single file instead of a directory (thus the "-f" suffix in the
+script's name, which can mean "file" among other things). Each entry is marked
+and can be added and removed separately.
 
 A special shortcut is provided for these L<Perinci::CmdLine>-based utilities. If
 you say:
