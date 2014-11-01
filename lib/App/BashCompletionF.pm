@@ -379,6 +379,9 @@ sub _add_pc {
             for my $prog (readdir $dh) {
                 next if $prog eq '.' || $prog eq '..';
                 $names{$prog} and next;
+                $prog =~ $Text::Fragment::re_id or next;
+
+                my $compprog;
                 my $detectres =
                     Perinci::CmdLine::Util::detect_perinci_cmdline_script(
                         script=>"$dir/$prog",
@@ -388,10 +391,10 @@ sub _add_pc {
                     do { warn "Can't detect $prog: $detectres->[1], skipped"; next };
                 $detectres->[2] or
                     do { say "DEBUG:Skipping $prog (".$detectres->[3]{'func.reason'}.")" if $DEBUG; next };
-
-                $prog =~ $Text::Fragment::re_id or next;
-
-                push @progs, $prog;
+                if ($detectres->[3]{'func.is_wrapper'}) {
+                    $compprog = $detectres->[3]{'func.wrapped'};
+                }
+                push @progs, {prog=>$prog, compprog=>$compprog//$prog};
                 $added++;
                 $names{$prog}++;
             }
@@ -400,7 +403,7 @@ sub _add_pc {
         for my $prog (@{ $opts->{progs} }) {
             $prog =~ s!.+/!!;
             $names{$prog} and next;
-            push @progs, $prog;
+            push @progs, {prog=>$prog, compprog=>$prog};
             $added++;
             $names{$prog}++;
         }
@@ -410,11 +413,12 @@ sub _add_pc {
 
     my $envres = envresmulti();
     for my $prog (@progs) {
-        say "Adding to bash-completion-f: $prog";
+        say "Adding to bash-completion-f: $prog->{prog}";
         my $insres = Text::Fragment::insert_fragment(
-            text=>$content, id=>$prog,
-            payload=>"complete -C '$prog' '$prog'");
-        $envres->add_result($insres->[0], $insres->[1], {item_id=>$prog});
+            text=>$content, id=>$prog->{prog},
+            payload=>"complete -C '$prog->{compprog}' '$prog->{prog}'");
+        $envres->add_result($insres->[0], $insres->[1],
+                            {item_id=>$prog->{prog}});
         next unless $insres->[0] == 200;
         $content = $insres->[2]{text};
     }
