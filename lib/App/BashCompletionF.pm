@@ -381,7 +381,9 @@ sub _add_pc {
                 $names{$prog} and next;
                 my $detectres =
                     Perinci::CmdLine::Util::detect_perinci_cmdline_script(
-                        script=>"$dir/$prog", filter_x=>1);
+                        script=>"$dir/$prog",
+                        include_noexec=>0,
+                        include_wrapper=>1);
                 $detectres->[0] == 200 or
                     do { warn "Can't detect $prog: $detectres->[1], skipped"; next };
                 $detectres->[2] or
@@ -443,4 +445,3 @@ sub add_all_pc {
 
 1;
 # ABSTRACT: Backend for bash-completion-f script
-
