@@ -1,5 +1,11 @@
 Revision history for App-BashCompletionF
 
+0.05    2014-11-01 (PERLANCAR)
+
+        - Can now detect "wrapper scripts", scripts that wrap a Perinci::CmdLine
+          script and basically have the same options/arguments.
+
+
 0.04    2014-10-31 (PERLANCAR)
 
 	- No functional changes.
