@@ -346,6 +346,8 @@ sub clean_entries {
 }
 
 sub _add_pc {
+    require Perinci::CmdLine::Util;
+
     my $opts = shift;
 
     my %args = @_;
@@ -376,21 +378,14 @@ sub _add_pc {
             say "DEBUG:Searching $dir ..." if $DEBUG;
             for my $prog (readdir $dh) {
                 next if $prog eq '.' || $prog eq '..';
-                (-f "$dir/$prog") && (-x _) or do { say "DEBUG:Skipping $prog (not an executable)" if $DEBUG; next };
                 $names{$prog} and next;
-
-                open my($fh), "<", "$dir/$prog" or do { say "DEBUG:Skipping $prog (can't read)" if $DEBUG; next };
-                read $fh, my($buf), 2; $buf eq '#!' or next;
-                # skip non perl
-                my $shebang = <$fh>; $shebang =~ /perl/ or do { say "DEBUG:Skipping $prog (not Perl script)" if $DEBUG; next };
-                my $found;
-                # skip unless we found something like 'use Perinci::CmdLine'
-                while (<$fh>) {
-                    if (/^\s*(use|require)\s+Perinci::CmdLine(|::Any|::Lite)/) {
-                        $found++; last;
-                    }
-                }
-                $found or do { say "DEBUG:Skipping $prog (no usage of Perinci::CmdLine)" if $DEBUG; next };
+                my $detectres =
+                    Perinci::CmdLine::Util::detect_perinci_cmdline_script(
+                        script=>"$dir/$prog", filter_x=>1);
+                $detectres->[0] == 200 or
+                    do { warn "Can't detect $prog: $detectres->[1], skipped"; next };
+                $detectres->[2] or
+                    do { say "DEBUG:Skipping $prog (".$detectres->[3]{'func.reason'}.")" if $DEBUG; next };
 
                 $prog =~ $Text::Fragment::re_id or next;
 
