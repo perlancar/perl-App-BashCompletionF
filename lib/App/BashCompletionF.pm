@@ -16,10 +16,11 @@ use Text::Fragment qw();
 our %SPEC;
 
 my $DEBUG = $ENV{DEBUG};
+my $re_progname = $Text::Fragment::re_id;
 
 $SPEC{':package'} = {
     v => 1.1,
-    summary => 'Manipulate bash-completion-f file which contains completion scripts',
+    summary => "Manipulate bash-completion-f containing 'complete' commands",
 };
 
 sub _f_path {
@@ -43,6 +44,90 @@ sub _write_f {
     my $content = shift;
     File::Slurp::Tiny::write_file($path, $content);
     [200];
+}
+
+sub _add {
+    my $opts = shift;
+
+    my %args = @_;
+
+    my $res = _read_parse_f($args{file});
+    return err("Can't read entries", $res) if $res->[0] != 200;
+
+    my $content = $res->[2]{content};
+
+    # collect all ids
+    my %ids;
+    for my $entry (@{ $res->[2]{parsed} }) {
+        my $parseres = _parse_entry($entry->{payload});
+        unless ($parseres->[0] == 200) {
+            warn "Can't parse 'complete' command for entry '$entry->{id}': ".
+                "$parseres->[1], skipped\n";
+            next;
+        }
+        $names{$_}++ for @{ $parseres->[2]{names} };
+    }
+
+    my $added;
+    my @progs;
+
+    if ($opts->{dirs}) {
+        for my $dir (@{ $opts->{dirs} }) {
+            opendir my($dh), $dir or next;
+            say "DEBUG:Searching $dir ..." if $DEBUG;
+            for my $prog (readdir $dh) {
+                next if $prog eq '.' || $prog eq '..';
+                $names{$prog} and next;
+                $prog =~ $Text::Fragment::re_id or next;
+
+                my $compprog;
+                my $detectres =
+                    Perinci::CmdLine::Util::detect_perinci_cmdline_script(
+                        script=>"$dir/$prog",
+                        include_noexec=>0,
+                        include_wrapper=>1);
+                $detectres->[0] == 200 or
+                    do { warn "Can't detect $prog: $detectres->[1], skipped"; next };
+                $detectres->[2] or
+                    do { say "DEBUG:Skipping $prog (".$detectres->[3]{'func.reason'}.")" if $DEBUG; next };
+                if ($detectres->[3]{'func.is_wrapper'}) {
+                    $compprog = $detectres->[3]{'func.wrapped'};
+                }
+                push @progs, {prog=>$prog, compprog=>$compprog//$prog};
+                $added++;
+                $names{$prog}++;
+            }
+        }
+    } elsif ($opts->{progs}) {
+        for my $prog (@{ $opts->{progs} }) {
+            $prog =~ s!.+/!!;
+            $names{$prog} and next;
+            push @progs, {prog=>$prog, compprog=>$prog};
+            $added++;
+            $names{$prog}++;
+        }
+    } else {
+        die "BUG: no progs or dirs given";
+    }
+
+    my $envres = envresmulti();
+    for my $prog (@progs) {
+        say "Adding to bash-completion-f: $prog->{prog}";
+        my $insres = Text::Fragment::insert_fragment(
+            text=>$content, id=>$prog->{prog},
+            payload=>"complete -C '$prog->{compprog}' '$prog->{prog}'");
+        $envres->add_result($insres->[0], $insres->[1],
+                            {item_id=>$prog->{prog}});
+        next unless $insres->[0] == 200;
+        $content = $insres->[2]{text};
+    }
+
+    if ($added) {
+        my $writeres = _write_f($args{file}, $content);
+        return err("Can't write", $writeres) if $writeres->[0] != 200;
+    }
+
+    $envres->as_struct;
 }
 
 my %arg_file = (file => {
@@ -141,31 +226,7 @@ sub add_entry {
     [200];
 }
 
-$SPEC{add_entries_pc} = {
-    v => 1.1,
-    summary => 'Add completion entries for Perinci::CmdLine-based CLI programs',
-    description => <<'_',
-
-This is a shortcut for `add_entry`. Doing:
-
-    % bash-completion-f add-pc foo bar baz
-
-will be the same as:
-
-    % bash-completion-f add --id foo 'complete -C foo foo'
-    % bash-completion-f add --id bar 'complete -C bar bar'
-    % bash-completion-f add --id baz 'complete -C baz baz'
-
-_
-    args => {
-        %arg_program,
-        %arg_file,
-    },
-};
-sub add_entries_pc {
-    my %args = @_;
-
-    _add_pc({progs=>delete($args{program})}, %args);
+    _add({entries=>delete($args{program})}, %args);
 }
 
 sub _delete_entries {
@@ -280,38 +341,6 @@ sub list_entries {
     [200, "OK", \@res];
 }
 
-sub _parse_entry {
-    require Parse::CommandLine;
-
-    my $payload = shift;
-    $payload =~ /^(complete\s.+)/m # XXX support multiline 'complete' command
-        or return [500, "Can't find 'complete' command"];
-
-    my @argv = Parse::CommandLine::parse_command_line($1)
-        or return [500, "Can't parse 'complete' command"];
-
-    # strip options that take argument. XXX very rudimentary, should be more
-    # proper (e.g. handle bundling).
-    my $i = 0;
-    while ($i < @argv) {
-        if ($argv[$i] =~ /\A-[oAGWFCXPS]/) {
-            splice(@argv, $i, 2);
-            next;
-        }
-        $i++;
-    }
-    shift @argv; # strip 'complete' itself
-    # XXX we just assume the names are at the end, should've stripped options
-    # more properly
-    my @names;
-    for (reverse @argv) {
-        last if /\A-/;
-        push @names, $_;
-    }
-
-    [200, "OK", {names=>\@names}];
-}
-
 $SPEC{clean_entries} = {
     v => 1.1,
     summary => 'Delete entries for commands that are not in PATH',
@@ -343,92 +372,6 @@ sub clean_entries {
          }},
         %args,
     );
-}
-
-sub _add_pc {
-    require Perinci::CmdLine::Util;
-
-    my $opts = shift;
-
-    my %args = @_;
-
-    my $res = _read_parse_f($args{file});
-    return err("Can't read entries", $res) if $res->[0] != 200;
-
-    my $content = $res->[2]{content};
-
-    # collect all the names mentioned
-    my %names;
-    for my $entry (@{ $res->[2]{parsed} }) {
-        my $parseres = _parse_entry($entry->{payload});
-        unless ($parseres->[0] == 200) {
-            warn "Can't parse 'complete' command for entry '$entry->{id}': ".
-                "$parseres->[1], skipped\n";
-            next;
-        }
-        $names{$_}++ for @{ $parseres->[2]{names} };
-    }
-
-    my $added;
-    my @progs;
-
-    if ($opts->{dirs}) {
-        for my $dir (@{ $opts->{dirs} }) {
-            opendir my($dh), $dir or next;
-            say "DEBUG:Searching $dir ..." if $DEBUG;
-            for my $prog (readdir $dh) {
-                next if $prog eq '.' || $prog eq '..';
-                $names{$prog} and next;
-                $prog =~ $Text::Fragment::re_id or next;
-
-                my $compprog;
-                my $detectres =
-                    Perinci::CmdLine::Util::detect_perinci_cmdline_script(
-                        script=>"$dir/$prog",
-                        include_noexec=>0,
-                        include_wrapper=>1);
-                $detectres->[0] == 200 or
-                    do { warn "Can't detect $prog: $detectres->[1], skipped"; next };
-                $detectres->[2] or
-                    do { say "DEBUG:Skipping $prog (".$detectres->[3]{'func.reason'}.")" if $DEBUG; next };
-                if ($detectres->[3]{'func.is_wrapper'}) {
-                    $compprog = $detectres->[3]{'func.wrapped'};
-                }
-                push @progs, {prog=>$prog, compprog=>$compprog//$prog};
-                $added++;
-                $names{$prog}++;
-            }
-        }
-    } elsif ($opts->{progs}) {
-        for my $prog (@{ $opts->{progs} }) {
-            $prog =~ s!.+/!!;
-            $names{$prog} and next;
-            push @progs, {prog=>$prog, compprog=>$prog};
-            $added++;
-            $names{$prog}++;
-        }
-    } else {
-        die "BUG: no progs or dirs given";
-    }
-
-    my $envres = envresmulti();
-    for my $prog (@progs) {
-        say "Adding to bash-completion-f: $prog->{prog}";
-        my $insres = Text::Fragment::insert_fragment(
-            text=>$content, id=>$prog->{prog},
-            payload=>"complete -C '$prog->{compprog}' '$prog->{prog}'");
-        $envres->add_result($insres->[0], $insres->[1],
-                            {item_id=>$prog->{prog}});
-        next unless $insres->[0] == 200;
-        $content = $insres->[2]{text};
-    }
-
-    if ($added) {
-        my $writeres = _write_f($args{file}, $content);
-        return err("Can't write", $writeres) if $writeres->[0] != 200;
-    }
-
-    $envres->as_struct;
 }
 
 $SPEC{add_all_pc} = {
